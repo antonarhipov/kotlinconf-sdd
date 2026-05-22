@@ -1,0 +1,293 @@
+tasks:
+  feature: "Temperature CSV Importer"
+  review_verdict: "PASS"
+  organizing_principle: "walking_skeleton"
+  assumptions:
+    - "Commons CSV 1.10+ is on Maven Central with DuplicateHeaderMode.DISALLOW; if 1.9 is selected, use setAllowDuplicateHeaderNames(false) per RULE-2."
+    - "The existing TestcontainersConfiguration with @ServiceConnection is reused for every @SpringBootTest slice (RULE-21)."
+    - "Per Risk Hotspot 4, the chosen UTF-8 strategy is documented in CsvFileProcessor KDoc; default is to accept partial inserts on mid-file encoding errors and surface 'encoding error' in the FAILED reason."
+  decisions:
+    - id: dec-1
+      decision: "Use walking_skeleton organizing principle."
+      reason: "Integration risk dominates (Flyway/MySQL/Testcontainers/filesystem moves); a thin end-to-end slice de-risks wiring before thickening row-level logic."
+      alternatives: ["layered", "feature_slice", "risk_first"]
+    - id: dec-2
+      decision: "Surface every Risk Hotspot as a `risk` annotation on the most specific implementing task; no dedicated review/MAJOR-N tasks are required because the review verdict is PASS with zero majors."
+      reason: "Hotspots are mitigations, not blockers; co-locating them with the implementing task keeps the executor aware at the right moment."
+      alternatives: ["Create separate risk-mitigation tasks per hotspot"]
+    - id: dec-3
+      decision: "Keep `temperature_readings` table name and `uk_name_datetime` unique key exactly as written in AC-46."
+      reason: "AC-46 fixes column names, types, and unique key verbatim; deviating would require a spec change."
+      alternatives: ["Introduce a surrogate natural key column"]
+  coverage_deferrals: []
+  phases:
+    - id: phase-1
+      name: "Scaffolding, configuration, and Flyway migration"
+      description: "Stand up the importer package, configuration binding, and the V1 migration so the Spring context boots green against Testcontainers MySQL."
+      covers: [AC-1, AC-2, AC-3, AC-4, AC-44, AC-45, AC-46, AC-51]
+      entry_criteria: "Repository is at the state described in rules.md Codebase Alignment (empty Application, TestcontainersConfiguration wired)."
+      tasks:
+        - id: task-1.1
+          name: "Add Apache Commons CSV dependency"
+          description: "Add `org.apache.commons:commons-csv` to build.gradle.kts (implementation scope) at a 1.10+ version compatible with Spring Boot 4.0.6."
+          artifact: "build.gradle.kts updated"
+          covers:
+            acs: []
+            rules: [RULE-2]
+          depends_on: []
+          complexity: "S"
+          validation: "`./gradlew dependencies` lists commons-csv on the runtime classpath; project compiles."
+        - id: task-1.2
+          name: "Create importer package and ImporterProperties"
+          description: "Create package `org.example.sdd.importer`; add `ImporterProperties` as `@ConfigurationProperties(\"importer\")` with non-nullable `inputDir: Path`; enable `@ConfigurationPropertiesScan` on `Application`."
+          artifact: "src/main/kotlin/org/example/sdd/importer/ImporterProperties.kt"
+          covers:
+            acs: [AC-1, AC-2]
+            rules: [RULE-3, RULE-4, RULE-5]
+          depends_on: []
+          complexity: "S"
+          validation: "Unit/slice test asserts that startup with `importer.input-dir` set binds the Path; startup without the property fails context refresh."
+          risk: "Risk Hotspot 5: BindException class/message wording is unstable across Spring Boot patches — tests must assert exit code + property name in stderr, never the exception class name."
+        - id: task-1.3
+          name: "Add Flyway V1 migration for temperature_readings"
+          description: "Create `V1__create_temperature_readings.sql` with the exact columns and unique key from AC-46 (id BIGINT AUTO_INCREMENT PK, name VARCHAR(255), datetime DATETIME, temp DECIMAL(5,2), uk_name_datetime)."
+          artifact: "src/main/resources/db/migration/V1__create_temperature_readings.sql"
+          covers:
+            acs: [AC-46]
+            rules: [RULE-20]
+          depends_on: []
+          complexity: "S"
+          validation: "Integration test boots context against Testcontainers MySQL and asserts `temperature_readings` and `uk_name_datetime` exist in INFORMATION_SCHEMA."
+        - id: task-1.4
+          name: "Startup smoke @SpringBootTest with Testcontainers"
+          description: "Add a `@SpringBootTest` + `@Import(TestcontainersConfiguration::class)` smoke test that boots the application with a valid `importer.input-dir` and asserts no embedded DB is on the classpath."
+          artifact: "src/test/kotlin/org/example/sdd/importer/StartupSmokeTest.kt"
+          covers:
+            acs: [AC-51, AC-44, AC-45]
+            rules: [RULE-21, RULE-22, RULE-19]
+          depends_on: [task-1.2, task-1.3]
+          complexity: "M"
+          validation: "Test passes; classpath check fails build if `com.h2database:h2` is added; deliberately misconfigured DB URL produces non-zero context startup."
+        - id: task-1.5
+          name: "Input path validation in runner"
+          description: "Add minimal `ImporterRunner` (`CommandLineRunner`) that validates `inputDir` with `Files.isDirectory`; non-existent or non-directory paths throw and propagate so Spring Boot exits non-zero."
+          artifact: "src/main/kotlin/org/example/sdd/importer/ImporterRunner.kt"
+          covers:
+            acs: [AC-3, AC-4]
+            rules: [RULE-6, RULE-19]
+          depends_on: [task-1.2]
+          complexity: "S"
+          validation: "Slice tests with a missing path and a regular-file path both fail context startup with non-zero exit and an ERROR log identifying the path."
+      checkpoint:
+        id: cp-1
+        description: "Skeleton boots end-to-end against Testcontainers MySQL with V1 migration applied."
+        criteria:
+          - "Context starts with valid `importer.input-dir`; fails with non-zero exit when unset, non-existent, or pointing at a regular file."
+          - "Migration V1 creates `temperature_readings` with the exact AC-46 schema."
+          - "No embedded DB dependency is on the classpath."
+    - id: phase-2
+      name: "Directory scanning and file lifecycle"
+      description: "Implement deterministic file selection plus `processed/`/`failed/` lifecycle so an empty input directory produces the correct TOTAL line end-to-end."
+      covers: [AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-36, AC-37, AC-38, AC-39, AC-47]
+      entry_criteria: "cp-1 passed."
+      tasks:
+        - id: task-2.1
+          name: "Implement DirectoryScanner"
+          description: "Add `DirectoryScanner` that uses `Files.list`, filters regular files where lowercased name ends with `.csv` and does not start with `.` or end with `.tmp`, and sorts by `Comparator.naturalOrder()` on filename; ensures `processed/`/`failed/` exist via `Files.createDirectories` and excludes them from the scan."
+          artifact: "src/main/kotlin/org/example/sdd/importer/DirectoryScanner.kt"
+          covers:
+            acs: [AC-5, AC-6, AC-7, AC-8, AC-9, AC-10]
+            rules: [RULE-6, RULE-7]
+          depends_on: [task-1.5]
+          complexity: "M"
+          validation: "Unit tests with a temp directory cover: nested files ignored, `.CSV`/`.Csv` accepted, dotfiles and `.tmp` excluded, natural-order sort, `processed/`/`failed/` auto-created and excluded."
+        - id: task-2.2
+          name: "Implement FileMover with collision suffix"
+          description: "Add `FileMover.move(file, destinationDir)` using `Files.move(... ATOMIC_MOVE)`; on `FileAlreadyExistsException` retry once with `<base>-<epochMillis>.<ext>`; any other `IOException` (including `AtomicMoveNotSupportedException`) is logged at ERROR, counted in `failed_files`, and leaves the source in place."
+          artifact: "src/main/kotlin/org/example/sdd/importer/FileMover.kt"
+          covers:
+            acs: [AC-36, AC-37, AC-38, AC-39]
+            rules: [RULE-14, RULE-16]
+          depends_on: [task-2.1]
+          complexity: "M"
+          validation: "Unit tests: successful move, name-collision suffix, IOException path keeps original file, ATOMIC_MOVE failure path keeps original file."
+          risk: "Risk Hotspot 3: ATOMIC_MOVE raises AtomicMoveNotSupportedException on cross-device moves common in Docker bind-mounts; exercise the failure path with a Testcontainers volume layout known to be cross-device and assert AC-39's 'original file in place'."
+        - id: task-2.3
+          name: "Wire scanner + mover into runner with empty-input path"
+          description: "Update `ImporterRunner` to call `DirectoryScanner` and iterate; when the scan yields no files, do not iterate and proceed to TOTAL printing (stubbed in this phase via a placeholder `SummaryPrinter` that prints only the empty TOTAL line)."
+          artifact: "ImporterRunner.kt updated; src/main/kotlin/org/example/sdd/importer/SummaryPrinter.kt (skeleton)"
+          covers:
+            acs: [AC-47]
+            rules: [RULE-15, RULE-18]
+          depends_on: [task-2.1, task-2.2]
+          complexity: "S"
+          validation: "`@SpringBootTest` end-to-end with empty input directory prints exactly `TOTAL: files=0, inserted=0, duplicates=0, malformed=0, failed_files=0` and exits 0."
+      checkpoint:
+        id: cp-2
+        description: "Filesystem lifecycle is complete and empty-input end-to-end works."
+        criteria:
+          - "Scanner deterministically selects only eligible top-level CSVs."
+          - "FileMover handles collisions and non-fatal move failures per AC-38/AC-39."
+          - "Empty input directory yields the exact AC-47 stdout line and exit 0."
+    - id: phase-3
+      name: "CSV parsing and row validation"
+      description: "Open files as strict UTF-8 with BOM handling, parse headers (RFC 4180), and classify rows (valid vs malformed) with the exact reasons and log shape required by the ACs."
+      covers: [AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-26, AC-27, AC-28, AC-29, AC-35, AC-41, AC-49]
+      entry_criteria: "cp-2 passed."
+      tasks:
+        - id: task-3.1
+          name: "Implement RowParser pure functions"
+          description: "Add `RowParser` with pure functions parsing/validating `name` (trim, length boundaries), `datetime` (single `DateTimeFormatter` accepting `T` or space + optional fractional seconds), and `temp` (`BigDecimal(String)` with DECIMAL(5,2) bounds); return a `RowResult` sealed class (Valid | Malformed(reason))."
+          artifact: "src/main/kotlin/org/example/sdd/importer/RowParser.kt + RowResult.kt"
+          covers:
+            acs: [AC-17, AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-26, AC-27, AC-28, AC-29]
+            rules: [RULE-9, RULE-10, RULE-11, RULE-16]
+          depends_on: []
+          complexity: "M"
+          validation: "Unit tests cover each boundary triplet (within/at/beyond), both datetime formats, empty/long name, non-numeric/out-of-range temp, wrong field count."
+        - id: task-3.2
+          name: "Implement CsvFileProcessor with strict UTF-8 + BOM stripping"
+          description: "Add `CsvFileProcessor` opening files via `Files.newBufferedReader(UTF_8)` wrapped in a BOM-stripping reader, driving `CSVFormat.RFC4180` with header parsing, empty-line skipping, and duplicate-header disallowed; emit `FatalFileError` on missing/duplicate header and on encoding error."
+          artifact: "src/main/kotlin/org/example/sdd/importer/CsvFileProcessor.kt"
+          covers:
+            acs: [AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-35, AC-49]
+            rules: [RULE-2, RULE-8, RULE-16]
+          depends_on: [task-3.1, task-1.1]
+          complexity: "M"
+          validation: "Unit tests cover: BOM stripped silently; missing required header → FAILED reason listing them; duplicate required header → FAILED reason; non-UTF-8 bytes → `encoding error`; blank body lines ignored without counter change; unknown columns ignored."
+          risk: "Risk Hotspot 4: MalformedInputException is raised lazily; document the chosen strategy (accept partial inserts and surface `encoding error` in FAILED reason) in KDoc; assert via a test that already-committed rows are not rolled back."
+        - id: task-3.3
+          name: "Row-level WARN/INFO logging contract"
+          description: "Add SLF4J logging from `CsvFileProcessor` and `RowParser` for malformed rows (`WARN file=<name> line=<n> reason=<text>`) and prepare the duplicate INFO shape (`INFO file=<name> line=<n> key=<name>|<datetime>`) used in phase-4; ensure row-level exceptions never escape the per-row try/catch."
+          artifact: "Logging integrated; src/test/kotlin/org/example/sdd/importer/RowLoggingTest.kt"
+          covers:
+            acs: []
+            rules: [RULE-17, RULE-16]
+          depends_on: [task-3.2]
+          complexity: "S"
+          validation: "Slice test captures SLF4J output and asserts WARN line shape for each malformed reason; no exception propagates beyond row scope."
+        - id: task-3.4
+          name: "Per-file FAILED line emission"
+          description: "Wire `CsvFileProcessor` to surface fatal file errors so `ImporterRunner` prints a `FAILED: <reason>` line on stdout immediately after the file's summary line."
+          artifact: "ImporterRunner.kt + SummaryPrinter.kt updated"
+          covers:
+            acs: [AC-41]
+            rules: [RULE-15, RULE-16]
+          depends_on: [task-3.2, task-2.2]
+          complexity: "S"
+          validation: "End-to-end test with a header-missing file asserts summary line then `FAILED: missing required header(s): ...` then file is in `failed/`."
+      checkpoint:
+        id: cp-3
+        description: "Files are parsed and rows classified; fatal-file paths emit the required outputs."
+        criteria:
+          - "All malformed reasons match the AC wording exactly and are WARN-logged in the required shape."
+          - "Encoding errors and header errors land files in `failed/` with a `FAILED:` line."
+          - "Header-only files parse without error (paving the way for AC-48 in phase-5)."
+    - id: phase-4
+      name: "Persistence and deduplication"
+      description: "Insert well-formed rows with MySQL upsert semantics and dedup the run in memory; this is the core domain layer and the highest-risk integration boundary."
+      covers: [AC-30, AC-31, AC-32, AC-33, AC-34, AC-50]
+      entry_criteria: "cp-3 passed."
+      tasks:
+        - id: task-4.1
+          name: "Implement TemperatureReadingRepository"
+          description: "Add `TemperatureReadingRepository` using `NamedParameterJdbcTemplate` with the exact SQL `INSERT INTO temperature_readings (name, datetime, temp) VALUES (:name, :datetime, :temp) ON DUPLICATE KEY UPDATE id = id`; expose `insertIfAbsent(...)` returning an `InsertOutcome` (Inserted | DuplicateInDb); any other SQLException is propagated as a fatal file error."
+          artifact: "src/main/kotlin/org/example/sdd/importer/TemperatureReadingRepository.kt"
+          covers:
+            acs: [AC-30, AC-31, AC-50]
+            rules: [RULE-12, RULE-16]
+          depends_on: []
+          complexity: "M"
+          validation: "@SpringBootTest with Testcontainers MySQL: first insert returns Inserted and a second insert of the same (name,datetime) returns DuplicateInDb without a new row; an injected SQLException (e.g., truncation) surfaces as a fatal file error."
+          risk: "Risk Hotspot 1: MySQL Connector/J `useAffectedRows` flag silently changes the return value; the duplicate test must assert both row count (no second row) AND the duplicate counter increment — never trust the return value alone — and a smoke test must assert the effective JDBC URL flags."
+        - id: task-4.2
+          name: "Implement RunDeduplicator with NFD+lowercase normalization"
+          description: "Add `RunDeduplicator` keeping a `MutableSet<Pair<String, LocalDateTime>>` for the whole run; normalize `name` via `Normalizer.NFD` + strip combining marks + `lowercase(Locale.ROOT)`; expose `seenOrAdd(name, datetime): Boolean`."
+          artifact: "src/main/kotlin/org/example/sdd/importer/RunDeduplicator.kt"
+          covers:
+            acs: [AC-32, AC-33, AC-34]
+            rules: [RULE-13]
+          depends_on: []
+          complexity: "S"
+          validation: "Unit tests: `Café`/`cafe` collide, same key in different files collides, different `datetime` does not collide."
+          risk: "Risk Hotspot 2: in-memory normalization approximates `utf8mb4_0900_ai_ci` but is not byte-identical (`ß` vs `ss`, Turkish `İ`/`i`, half-width kana); add integration test pairs (`Café`/`cafe`, `MASSE`/`maße`, `İstanbul`/`istanbul`) asserting in-memory and DB detection agree; document known divergences in KDoc."
+        - id: task-4.3
+          name: "Wire repository + deduper into CsvFileProcessor"
+          description: "Update `CsvFileProcessor` to consult `RunDeduplicator` first, then call `TemperatureReadingRepository.insertIfAbsent`; increment `inserted` and `duplicates` counters accordingly and emit the duplicate INFO log."
+          artifact: "CsvFileProcessor.kt updated"
+          covers:
+            acs: [AC-30, AC-31, AC-32, AC-33, AC-34]
+            rules: [RULE-12, RULE-13, RULE-16, RULE-17]
+          depends_on: [task-4.1, task-4.2, task-3.2]
+          complexity: "M"
+          validation: "@SpringBootTest end-to-end inserts rows from two CSV files where the second file repeats keys from the first; final DB row count matches expected and INFO duplicate log lines match the required key=<name>|<datetime> shape."
+        - id: task-4.4
+          name: "Per-row SQLException → fatal file error"
+          description: "Ensure that a non-duplicate `SQLException` thrown from the repository stops processing the current file, moves it to `failed/`, increments `failed_files`, and lets the run continue with the next file."
+          artifact: "CsvFileProcessor.kt + ImporterRunner.kt updated"
+          covers:
+            acs: [AC-50]
+            rules: [RULE-12, RULE-14, RULE-16]
+          depends_on: [task-4.3, task-2.2]
+          complexity: "S"
+          validation: "@SpringBootTest using a row that triggers a non-duplicate `SQLException` (e.g., temporarily broken constraint) verifies the file is in `failed/`, `FAILED:` line printed, run continues."
+      checkpoint:
+        id: cp-4
+        description: "Core domain logic in place; uniqueness contract verified end-to-end against MySQL."
+        criteria:
+          - "DB duplicate, in-file duplicate, cross-file duplicate, and accent-insensitive duplicate all increment `duplicates` and emit no extra DB rows."
+          - "Non-duplicate SQLException is fatal for the file only; the run continues."
+          - "Risk Hotspot 1 and 2 integration tests are green."
+    - id: phase-5
+      name: "Summary output and end-to-end behavior"
+      description: "Finalize stdout summary lines, TOTAL ordering, exit-code semantics, and the header-only file edge case."
+      covers: [AC-40, AC-42, AC-43, AC-48, AC-52]
+      entry_criteria: "cp-4 passed."
+      tasks:
+        - id: task-5.1
+          name: "Implement SummaryPrinter for per-file and TOTAL lines"
+          description: "Finalize `SummaryPrinter` using a single captured `PrintStream`; emit `<file>: inserted=<n>, duplicates=<n>, malformed=<n>` flushed per file and the final `TOTAL: files=<n>, inserted=<n>, duplicates=<n>, malformed=<n>, failed_files=<n>` last."
+          artifact: "SummaryPrinter.kt updated"
+          covers:
+            acs: [AC-40, AC-42, AC-52]
+            rules: [RULE-15]
+          depends_on: []
+          complexity: "S"
+          validation: "Unit test with a fake PrintStream asserts exact line shapes; ordering test runs multiple files and asserts ascending filename order followed by TOTAL last."
+        - id: task-5.2
+          name: "Exit-code zero on per-file outcomes"
+          description: "Ensure `ImporterRunner` returns normally (no `exitCode` bean, no `System.exit`) after summary; document that startup errors propagate per RULE-19."
+          artifact: "ImporterRunner.kt updated"
+          covers:
+            acs: [AC-43]
+            rules: [RULE-18, RULE-19]
+          depends_on: [task-5.1]
+          complexity: "S"
+          validation: "@SpringBootTest with a mixed run (some failed files, some malformed rows) asserts process exit code 0 and TOTAL line present."
+        - id: task-5.3
+          name: "Header-only file handled as success"
+          description: "Verify that a file with a valid header and zero data rows is moved to `processed/`, prints `<file>: inserted=0, duplicates=0, malformed=0`, and does not increment `failed_files`."
+          artifact: "src/test/kotlin/org/example/sdd/importer/HeaderOnlyFileTest.kt"
+          covers:
+            acs: [AC-48]
+            rules: [RULE-14, RULE-15]
+          depends_on: [task-5.1, task-4.3]
+          complexity: "S"
+          validation: "@SpringBootTest asserts stdout summary line shape and the file's presence in `processed/`."
+        - id: task-5.4
+          name: "End-to-end stdout summary slice"
+          description: "Add the end-to-end `@SpringBootTest` named in RULE-22 that processes a mixed directory (insert, DB duplicate, accent-insensitive duplicate, malformed rows, header-only file, one fatal file) and asserts the entire stdout transcript byte-for-byte."
+          artifact: "src/test/kotlin/org/example/sdd/importer/EndToEndStdoutTest.kt"
+          covers:
+            acs: [AC-40, AC-41, AC-42, AC-43, AC-47, AC-48, AC-52]
+            rules: [RULE-15, RULE-22]
+          depends_on: [task-5.1, task-5.2, task-5.3, task-4.4, task-3.4]
+          complexity: "M"
+          validation: "Test passes; transcript ordering is deterministic across runs."
+      checkpoint:
+        id: cp-5
+        description: "Feature complete; end-to-end stdout transcript stable."
+        criteria:
+          - "All ACs covered by passing tests."
+          - "Exit code is 0 on any run that produces a summary."
+          - "Stdout ordering is deterministic and TOTAL is the last line."
