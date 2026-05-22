@@ -4,7 +4,7 @@
 
 A one-shot Kotlin + Spring Boot CLI that scans a configured directory for `*.csv` files, parses each as RFC 4180, and upserts `(name, datetime, temp)` rows into MySQL `temperature_readings` with per-row duplicate / malformed handling and per-file disposition to `processed/` or `failed/`.
 
-Stack: Kotlin 2.2.21, Spring Boot 4.0.6, JDK 21, `spring-boot-starter-data-jdbc`, Flyway 11.x (`flyway-mysql`), MySQL Connector/J, Testcontainers MySQL, JUnit 5 + `kotlin-test-junit5`. New dependency: Apache Commons CSV.
+Stack: Kotlin 2.2.21, Spring Boot 4.0.6, JDK 21, `spring-boot-starter-data-jdbc`, Flyway 11.x (`flyway-mysql`), MySQL Connector/J, Testcontainers MySQL, JUnit 5 + `kotlin-test-junit5`. New dependency: Apache Commons CSV. No Bean Validation starter is introduced — `importer.input-dir` is enforced via Kotlin non-nullable binding (see `RULE-5`).
 
 See: [spec/spec.md](./spec.md), [spec/criteria.md](./criteria.md), [spec/proposal.md](./proposal.md).
 
@@ -28,7 +28,7 @@ See: [spec/spec.md](./spec.md), [spec/criteria.md](./criteria.md), [spec/proposa
 **Key dependencies:**
 - **Add:** `org.apache.commons:commons-csv` — RFC 4180 parser with header-map API (AC-11..AC-13).
 - **Use existing:** `spring-boot-starter-data-jdbc` (for `NamedParameterJdbcTemplate`), `spring-boot-starter-flyway` + `flyway-mysql`, `mysql-connector-j`, `spring-boot-testcontainers`, `testcontainers-mysql`, `kotlin-test-junit5`.
-- **Considered and declined:** Spring Batch (canonical batch framework — declined because the spec demands a single-source, single-table, restart-by-rerun importer with no chunk/JobRepository requirements). FastCSV / Jackson-CSV / hand-rolled parser (declined in favor of Commons CSV's mature header-map API). H2 (forbidden by spec).
+- **Considered and declined:** Spring Batch (canonical batch framework — declined because the spec demands a single-source, single-table, restart-by-rerun importer with no chunk/JobRepository requirements). FastCSV / Jackson-CSV / hand-rolled parser (declined in favor of Commons CSV's mature header-map API). H2 (forbidden by spec). `spring-boot-starter-validation` (canonical Bean Validation starter — declined because the only configuration property that needs null-rejection is `importer.input-dir`, and Kotlin's non-nullable `Path` binding already fails context startup on a missing value; adding the starter just to write `@field:NotNull` would be unrecorded surface area).
 
 ## Codebase Alignment
 
@@ -43,8 +43,8 @@ There is no `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` in the repository; the only 
 
 ### RULE-2
 **Covers:** AC-11, AC-12, AC-13, AC-16, AC-27, AC-35
-**MUST** parse CSV input using `org.apache.commons:commons-csv` with `CSVFormat.RFC4180.builder().setHeader().setSkipHeaderRecord(true).setIgnoreEmptyLines(true).setAllowDuplicateHeaderNames(false).build()`.
-**Reason:** RFC 4180 compliance, header-map lookup, blank-line skipping, and duplicate-header detection are required by ACs; Commons CSV provides them out of the box. Disabling `allowDuplicateHeaderNames` lets the parser surface the duplicate-required-header fatal case (AC-15) directly.
+**MUST** parse CSV input using `org.apache.commons:commons-csv` configured from `CSVFormat.RFC4180` with header parsing enabled (`setHeader()` + `setSkipHeaderRecord(true)`), empty-line skipping enabled (`setIgnoreEmptyLines(true)`), and duplicate header names disallowed (via whichever duplicate-header setting the linked Commons CSV version exposes — e.g., `setAllowDuplicateHeaderNames(false)` in 1.9 or `setDuplicateHeaderMode(DuplicateHeaderMode.DISALLOW)` in 1.10+).
+**Reason:** RFC 4180 compliance, header-map lookup, blank-line skipping, and duplicate-header detection are required by ACs; Commons CSV provides them out of the box. Disallowing duplicate headers lets the parser surface the duplicate-required-header fatal case (AC-15) directly; phrasing the duplicate-header setting version-agnostically keeps the rule valid across Commons CSV 1.9/1.10+ where the setter was renamed.
 
 ### RULE-3
 **Covers:** project-wide
@@ -58,8 +58,8 @@ There is no `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` in the repository; the only 
 
 ### RULE-5
 **Covers:** AC-2
-**MUST** annotate `ImporterProperties.inputDir` with `@field:NotNull` (or equivalent Bean Validation) and enable `@ConfigurationPropertiesScan` so a missing `importer.input-dir` causes a `BindException` at startup before any `CommandLineRunner` runs.
-**Reason:** AC-2 requires startup failure with non-zero exit when the property is unset; binding-time validation produces that behavior with a single, observable error path.
+**MUST** declare `ImporterProperties.inputDir` as a non-nullable Kotlin `Path` (no default, no nullable type) and enable `@ConfigurationPropertiesScan` so that a missing `importer.input-dir` causes Spring Boot's `Binder` to fail context startup before any `CommandLineRunner` runs; **MUST NOT** add `spring-boot-starter-validation` or any JSR-303 `@NotNull` annotation to satisfy this rule.
+**Reason:** AC-2 requires startup failure with non-zero exit when the property is unset; Spring Boot's `Binder` already rejects null bindings to non-nullable Kotlin properties at context refresh time (surfacing as a `BindException` wrapping the binding failure), producing the same observable error path without pulling in Bean Validation. The negative half pins the decision so an implementing agent does not silently add `spring-boot-starter-validation` when the build file does not declare it.
 
 ### RULE-6
 **Covers:** AC-3, AC-4, AC-9, AC-10
