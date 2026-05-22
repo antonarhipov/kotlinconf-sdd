@@ -1,0 +1,9 @@
+{
+    "github-JetBrains-junie-extensions": {
+        "url": "https://github.com/JetBrains/junie-extensions",
+        "extensions": [
+            "kotlin-engineer",
+            "spring-boot-engineer"
+        ]
+    }
+}
