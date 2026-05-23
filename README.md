@@ -8,8 +8,6 @@ This repository is intentionally organized to show how a feature evolves across 
 - **`spec`** — the branch where the specification artifacts are added and refined
 - **`implementation`** — the branch where the agent implements the specification
 
-The repository is handed over to conference attendees so they can inspect the project after the talk, compare branches, and follow the workflow end to end.
-
 ## What this project demonstrates
 
 The demo application is a Kotlin CLI-style Spring Boot application intended to import temperature data from CSV files into a MySQL database.
@@ -28,8 +26,8 @@ On the `main` branch, the project is mostly a generated Spring Boot/Kotlin skele
 
 ### Root
 
-- `.claude/` — additional assistant-related project configuration
-- `.junie/` — workflow command definitions used during the SDD process
+- `.claude/` — Claude Code configuration and SDD agent skills
+- `.junie/` — Junie configuration and SDD agent skills
 - `build.gradle.kts` — Gradle build configuration for Kotlin + Spring Boot
 - `compose.yaml` — local MySQL service definition for Docker Compose
 - `gradle/`, `gradlew`, `gradlew.bat` — Gradle wrapper files
@@ -37,18 +35,33 @@ On the `main` branch, the project is mostly a generated Spring Boot/Kotlin skele
 - `spec/` — specification artifacts for the demo feature
 - `src/` — application and test source code
 
-### `.junie/commands`
+### AI assistant configuration
 
-This directory contains the command prompts that drive the workflow:
+This project is preconfigured for both **Junie** and **Claude Code**.
 
-- `01-spec.md` — create or refine the functional specification
-- `02-criteria.md` — define acceptance / verification criteria
-- `03-rules.md` — establish implementation rules and constraints
-- `04-review.md` — review the specification package for gaps or issues
-- `05-plan.md` — break the work into an implementation plan / tasks
-- `06-execute.md` — implement the plan
+The `.junie` and `.claude` directories contain equivalent SDD-oriented agent skills and command definitions so the same workflow can be demonstrated with either assistant environment.
 
-These files are the heart of the demo: they show how the assistant is guided step by step instead of jumping directly to code.
+### Included SDD skills and commands
+
+The command set included in this repository guides the workflow step by step:
+
+- **spec** — create or refine the functional specification
+- **criteria** — define acceptance and verification criteria
+- **rules** — capture implementation rules, constraints, and non-goals
+- **review** — inspect the specification package for ambiguity, gaps, or contradictions
+- **tasks / plan** — break the work into actionable implementation steps
+- **execute** — implement the agreed plan
+
+In `.junie/commands`, these appear as:
+
+- `01-spec.md`
+- `02-criteria.md`
+- `03-rules.md`
+- `04-review.md`
+- `05-plan.md`
+- `06-execute.md`
+
+These files are the core of the demo: they show how the assistant is guided deliberately through a structured workflow instead of jumping straight to implementation.
 
 ### `spec/`
 
@@ -92,7 +105,7 @@ This proposal describes *what* the software should do, without immediately jumpi
 
 ### 2. Build the specification package
 
-On the **`spec`** branch, the workflow commands in `.junie/commands` are used to turn the proposal into a complete implementation-ready specification.
+On the **`spec`** branch, the workflow commands in `.junie/commands` and their equivalents in `.claude` are used to turn the proposal into a complete, implementation-ready specification.
 
 Typical progression:
 
@@ -100,7 +113,7 @@ Typical progression:
 2. **criteria** — define acceptance criteria and expected outcomes
 3. **rules** — capture constraints, architecture guidance, and non-goals
 4. **review** — inspect the spec package for ambiguity, gaps, and contradictions
-5. **plan / tasks** — turn the reviewed specification into actionable implementation steps
+5. **tasks / plan** — turn the reviewed specification into actionable implementation steps
 6. **execute** — implement the agreed plan
 
 This staged approach makes the development process explicit and reviewable.
@@ -114,22 +127,6 @@ This separation is deliberate:
 - `main` shows the untouched starting point
 - `spec` shows how the requirements were shaped
 - `implementation` shows the resulting code
-
-For attendees, comparing these branches helps answer three different questions:
-
-- **What did we start with?** → `main`
-- **How was the work specified?** → `spec`
-- **What was finally built?** → `implementation`
-
-## How to explore the demo after the talk
-
-A good way to inspect the repository is:
-
-1. Open **`main`** to see the baseline project.
-2. Switch to **`spec`** to review the specification artifacts and workflow outputs.
-3. Switch to **`implementation`** to inspect the completed implementation.
-4. Compare branches to see how the repository changes over time.
-5. Read the command files in `.junie/commands` to understand how each workflow step is prompted.
 
 ## Running the project
 
@@ -160,4 +157,4 @@ The goal of this demo is not only to show a Kotlin/Spring application, but to de
 - break it into tasks
 - execute against that specification
 
-That makes the process easier to explain, review, and reproduce — which is exactly what this repository is meant to capture for conference attendees.
+That makes the process easier to explain, review, and reproduce.
