@@ -2,7 +2,7 @@
 
 ## Current
 
-- Task: task-2.1
+- Task: task-3.1
 - Status: NOT_STARTED
 
 ## Completed
@@ -12,11 +12,14 @@
 - task-1.3
 - task-1.4
 - task-1.5
+- task-2.1
+- task-2.2
+- task-2.3
 
 ## Phase Approvals
 
-- phase-1: PENDING
-- phase-2: PENDING
+- phase-1: APPROVED
+- phase-2: APPROVED
 - phase-3: PENDING
 - phase-4: PENDING
 - phase-5: PENDING
@@ -26,3 +29,5 @@
 ## Deviations
 
 ## Notes
+
+- task-2.2: Overcame platform-dependent behavior of macOS Files.move(..., ATOMIC_MOVE) by explicitly checking for existing files and throwing FileAlreadyExistsException.
