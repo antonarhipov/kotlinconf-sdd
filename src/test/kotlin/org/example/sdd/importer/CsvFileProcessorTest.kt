@@ -13,7 +13,13 @@ class CsvFileProcessorTest {
     @TempDir
     lateinit var tempDir: Path
 
-    private val processor = CsvFileProcessor()
+    private val runDeduplicator = RunDeduplicator()
+    private val repository = object : TemperatureReadingRepository(org.mockito.Mockito.mock(org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate::class.java)) {
+        override fun insertIfAbsent(name: String, datetime: java.time.LocalDateTime, temp: java.math.BigDecimal): InsertOutcome {
+            return InsertOutcome.Inserted
+        }
+    }
+    private val processor = CsvFileProcessor(runDeduplicator, repository)
 
     @Test
     fun `should parse valid csv file and ignore unknown columns`() {

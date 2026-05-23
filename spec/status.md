@@ -2,7 +2,7 @@
 
 ## Current
 
-- Task: task-3.4
+- Task: task-4.4
 - Status: COMPLETE
 
 ## Completed
@@ -19,13 +19,17 @@
 - task-3.2
 - task-3.3
 - task-3.4
+- task-4.1
+- task-4.2
+- task-4.3
+- task-4.4
 
 ## Phase Approvals
 
 - phase-1: APPROVED
 - phase-2: APPROVED
-- phase-3: PENDING
-- phase-4: PENDING
+- phase-3: APPROVED
+- phase-4: APPROVED
 - phase-5: PENDING
 
 ## Blockers

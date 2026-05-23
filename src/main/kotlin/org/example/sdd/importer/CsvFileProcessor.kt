@@ -11,7 +11,10 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 @Component
-class CsvFileProcessor {
+class CsvFileProcessor(
+    private val runDeduplicator: RunDeduplicator,
+    private val repository: TemperatureReadingRepository
+) {
     private val logger = org.slf4j.LoggerFactory.getLogger(CsvFileProcessor::class.java)
 
     fun process(file: Path): CsvProcessResult {
@@ -80,6 +83,7 @@ class CsvFileProcessor {
                 }
 
                 var inserted = 0
+                var duplicatesCount = 0
                 var malformedCount = 0
 
                 val iterator = parser.iterator()
@@ -113,22 +117,37 @@ class CsvFileProcessor {
 
                         when (val rowResult = RowParser.parseRow(nameVal, datetimeVal, tempVal)) {
                             is RowResult.Valid -> {
-                                inserted++
+                                if (runDeduplicator.seenOrAdd(rowResult.name, rowResult.datetime)) {
+                                    logger.info("file={} line={} key={}|{}", file.fileName.toString(), lineNum, rowResult.name, rowResult.datetime)
+                                    duplicatesCount++
+                                } else {
+                                    val outcome = repository.insertIfAbsent(rowResult.name, rowResult.datetime, rowResult.temp)
+                                    if (outcome == InsertOutcome.Inserted) {
+                                        inserted++
+                                    } else {
+                                        logger.info("file={} line={} key={}|{}", file.fileName.toString(), lineNum, rowResult.name, rowResult.datetime)
+                                        duplicatesCount++
+                                    }
+                                }
                             }
                             is RowResult.Malformed -> {
                                 logger.warn("file={} line={} reason={}", file.fileName.toString(), lineNum, rowResult.reason)
                                 malformedCount++
                             }
                         }
+                    } catch (e: org.springframework.dao.DataAccessException) {
+                        throw DatabaseFileError("database error", inserted, malformedCount, e)
                     } catch (e: Exception) {
                         logger.warn("file={} line={} reason=row error: {}", file.fileName.toString(), parser.currentLineNumber, e.message)
                         malformedCount++
                     }
                 }
 
-                return CsvProcessResult(inserted, malformedCount)
+                return CsvProcessResult(inserted, duplicatesCount, malformedCount)
             }
         } catch (e: Exception) {
+            if (e is DatabaseFileError) throw e
+            if (e is org.springframework.dao.DataAccessException) throw DatabaseFileError("database error", 0, 0, e)
             if (isEncodingError(e)) throw FileEncodingError("encoding error")
             throw e
         }
@@ -146,9 +165,11 @@ class CsvFileProcessor {
 
 data class CsvProcessResult(
     val inserted: Int,
+    val duplicates: Int,
     val malformed: Int
 )
 
 class HeaderMissingError(message: String) : RuntimeException(message)
 class HeaderDuplicateError(message: String) : RuntimeException(message)
 class FileEncodingError(message: String, val inserted: Int = 0, val malformed: Int = 0) : RuntimeException(message)
+class DatabaseFileError(message: String, val inserted: Int = 0, val malformed: Int = 0, cause: Throwable? = null) : RuntimeException(message, cause)

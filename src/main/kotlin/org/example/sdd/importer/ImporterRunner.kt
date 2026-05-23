@@ -10,7 +10,7 @@ class ImporterRunner(
     private val properties: ImporterProperties,
     private val directoryScanner: DirectoryScanner = DirectoryScanner(),
     private val summaryPrinter: SummaryPrinter = SummaryPrinter(),
-    private val csvFileProcessor: CsvFileProcessor = CsvFileProcessor(),
+    private val csvFileProcessor: CsvFileProcessor,
     private val fileMover: FileMover = FileMover()
 ) : CommandLineRunner {
 
@@ -53,9 +53,10 @@ class ImporterRunner(
             try {
                 val result = csvFileProcessor.process(file)
                 totalInserted += result.inserted
+                totalDuplicates += result.duplicates
                 totalMalformed += result.malformed
 
-                summaryPrinter.printFileSummary(out, fileName, result.inserted, 0, result.malformed)
+                summaryPrinter.printFileSummary(out, fileName, result.inserted, result.duplicates, result.malformed)
 
                 val moved = fileMover.move(file, processedDir)
                 if (moved == null) {
@@ -66,6 +67,7 @@ class ImporterRunner(
                     is HeaderMissingError -> Triple(e.message ?: "missing header", 0, 0)
                     is HeaderDuplicateError -> Triple(e.message ?: "duplicate header", 0, 0)
                     is FileEncodingError -> Triple(e.message ?: "encoding error", e.inserted, e.malformed)
+                    is DatabaseFileError -> Triple(e.message ?: "database error", e.inserted, e.malformed)
                     else -> Triple(e.message ?: "unknown fatal error", 0, 0)
                 }
 

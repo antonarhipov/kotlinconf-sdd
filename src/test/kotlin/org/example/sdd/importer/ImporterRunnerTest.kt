@@ -11,11 +11,17 @@ class ImporterRunnerTest {
     @TempDir
     lateinit var tempDir: Path
 
+    private val csvFileProcessor = object : CsvFileProcessor(RunDeduplicator(), org.mockito.Mockito.mock(TemperatureReadingRepository::class.java)) {
+        override fun process(file: Path): CsvProcessResult {
+            return CsvProcessResult(0, 0, 0)
+        }
+    }
+
     @Test
     fun `should throw StartupError when input directory does not exist`() {
         val nonExistentPath = tempDir.resolve("does-not-exist")
         val properties = ImporterProperties(inputDir = nonExistentPath)
-        val runner = ImporterRunner(properties)
+        val runner = ImporterRunner(properties, csvFileProcessor = csvFileProcessor)
 
         assertThatThrownBy { runner.run() }
             .isInstanceOf(StartupError::class.java)
@@ -27,7 +33,7 @@ class ImporterRunnerTest {
         val filePath = tempDir.resolve("regular-file.txt")
         Files.createFile(filePath)
         val properties = ImporterProperties(inputDir = filePath)
-        val runner = ImporterRunner(properties)
+        val runner = ImporterRunner(properties, csvFileProcessor = csvFileProcessor)
 
         assertThatThrownBy { runner.run() }
             .isInstanceOf(StartupError::class.java)
@@ -37,7 +43,7 @@ class ImporterRunnerTest {
     @Test
     fun `should proceed normally when input path is an existing directory`() {
         val properties = ImporterProperties(inputDir = tempDir)
-        val runner = ImporterRunner(properties)
+        val runner = ImporterRunner(properties, csvFileProcessor = csvFileProcessor)
 
         // Should not throw any exception
         runner.run()
