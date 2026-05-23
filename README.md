@@ -109,12 +109,36 @@ On the **`spec`** branch, the workflow commands in `.junie/commands` and their e
 
 Typical progression:
 
-1. **spec** — clarify the feature and scope
-2. **criteria** — define acceptance criteria and expected outcomes
-3. **rules** — capture constraints, architecture guidance, and non-goals
-4. **review** — inspect the spec package for ambiguity, gaps, and contradictions
-5. **tasks / plan** — turn the reviewed specification into actionable implementation steps
-6. **execute** — implement the agreed plan
+```text
+proposal.md
+    |
+    v
+[spec] ---------> spec.md
+    |
+    v
+[criteria] -----> criteria.md
+    |
+    v
+[rules] --------> rules.md
+    |
+    v
+[review] -------> review.md
+    |
+    v
+[tasks / plan] -> plan.md / tasks.md
+    |
+    v
+[execute] ------> implementation on the implementation branch
+```
+
+Artifact flow by step:
+
+1. **spec** → produces the feature specification (`spec.md`)
+2. **criteria** → produces acceptance criteria (`criteria.md`)
+3. **rules** → produces implementation rules and constraints (`rules.md`)
+4. **review** → produces a review of the specification package (`review.md`)
+5. **tasks / plan** → produces an implementation breakdown (`plan.md` and/or `tasks.md`)
+6. **execute** → produces the actual implementation from the approved specification artifacts
 
 This staged approach makes the development process explicit and reviewable.
 
