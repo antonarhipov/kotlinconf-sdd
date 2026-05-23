@@ -2,8 +2,8 @@
 
 ## Current
 
-- Task: task-3.1
-- Status: NOT_STARTED
+- Task: task-3.4
+- Status: COMPLETE
 
 ## Completed
 
@@ -15,6 +15,10 @@
 - task-2.1
 - task-2.2
 - task-2.3
+- task-3.1
+- task-3.2
+- task-3.3
+- task-3.4
 
 ## Phase Approvals
 
