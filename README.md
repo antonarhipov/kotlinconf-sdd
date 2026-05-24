@@ -1,6 +1,8 @@
 # kotlinconf-sdd
 
-Demo project for a conference talk about **Specification-Driven Development (SDD)** with an AI-assisted workflow.
+Demo project for a KotlinConf 2026 conference talk about **Specification-Driven Development (SDD)** with an AI-assisted workflow.
+
+Slides: [Spec-Driven Development with AI-Agents: From High-Level Requirements to Working Software](https://speakerdeck.com/antonarhipov/spec-driven-development-with-ai-agents-from-high-level-requirements-to-working-software-e397ad2e-3484-4bfa-a80b-6c47c593ed11)
 
 This repository is intentionally organized to show how a feature evolves across three branches:
 
